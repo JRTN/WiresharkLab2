@@ -84,22 +84,17 @@ public class App {
 					TCPFlow flow = new TCPFlow(srcAddr, srcPort, dstAddr, dstPort);
 					if(!flowMap.containsKey(flow)) {
 						flowMap.put(flow, flow);
+						flow.setStartTimeStamp(handle.getTimestamp().getTime());
 					} else {
 						flow = flowMap.get(flow);
 					}
 
-					flow.addPacket();
-					flow.addBytes((int)packet.length());
-
-					if(tcpHeader.getSyn()) {
-						flow.setSyn(true);
-						flow.setStartTimeStamp(handle.getTimestamp().getTime());
-					}
-
 					if(tcpHeader.getFin()) {
-						flow.setFin(true);
 						flow.setEndTimeStamp(handle.getTimestamp().getTime());
 					}
+
+					flow.addPacket(tcpPacket);
+					flow.addBytes(packet.length());
 					
 				} else if (packet.get(UdpPacket.class) != null) {
 					udpCounter++;
@@ -128,7 +123,7 @@ public class App {
 		//PRINT TCP SUMMARY TABLE
 		System.out.println("TCP Summary Table");
 		for(TCPFlow flow : flowMap.keySet()) {
-			System.out.println(flow.toString());
+			System.out.println(flow.asCSV());
 		}
 		System.out.println();
 
@@ -152,15 +147,19 @@ class TCPFlow {
 	private String destIP;
 	private int destPort;
 
-	private int packets;
+	private int numPackets;
+	private int numComplete;
+	private int numIncomplete;
 
 	private int bytes;
 
 	private boolean syn = false;
-	private boolean fin = true;
+	private boolean fin = false;
 
 	private long startTime;
 	private long endTime;
+
+	private List<TcpPacket> packetList = new LinkedList<>();
 
 
 	TCPFlow(String sip, int sport, String dip, int dport) {
@@ -169,7 +168,9 @@ class TCPFlow {
 		destIP = dip;
 		destPort = dport;
 
-		packets = 0;
+		numPackets = 0;
+		numComplete = 0;
+		numIncomplete = 0;
 		bytes = 0;
 		startTime = 0;
 		endTime = 0;
@@ -177,9 +178,9 @@ class TCPFlow {
 
 	private double getBandwidth() {
 		double returnVal = 0.0;
-		if(packets >= 2) {
+		if(numPackets >= 2) {
 			double seconds = (endTime - startTime) / 1000000.0;
-			returnVal = ((double)bytes / 125000) / seconds;
+			returnVal = (bytes / 125000.0) / seconds;
 			return returnVal;
 		}
 		return 0.0;
@@ -193,8 +194,23 @@ class TCPFlow {
 		endTime = time;
 	}
 
-	public void addPacket() {
-		packets++;
+	public void addPacket(TcpPacket packet) {
+		packetList.add(packet);
+		numPackets++;
+
+		if(packet.getHeader().getSyn()) {
+			setSyn(true);
+		}
+
+		if(syn && !fin) {
+			numComplete++;
+		} else if(!syn || isComplete()) {
+			numIncomplete++;
+		}
+
+		if(packet.getHeader().getFin()) {
+			setFin(true);
+		}
 	}
 
 	public void addBytes(int val) {
@@ -215,16 +231,30 @@ class TCPFlow {
 
 	private int getCompletePacketCount() {
 		if(isComplete()) {
-			return packets;
+			return numComplete;
 		}
 		return 0;
 	}
 
 	private int getIncompletePacketCount() {
 		if(!isComplete()) {
-			return packets;
+			return numPackets;
 		}
-		return 0;
+
+		return numIncomplete;
+	}
+
+	public String asCSV() {
+		String base = String.format("%s, %d, %s, %d, %d, %d", 
+								srcIP, srcPort, destIP, destPort,
+								getCompletePacketCount(), getIncompletePacketCount());
+		String bandwidthString = String.format(", %d, %f", bytes, getBandwidth());
+
+		if(isComplete()) {
+			return base + bandwidthString;
+		}
+
+		return base;
 	}
 
 	@Override
@@ -236,19 +266,5 @@ class TCPFlow {
 	public boolean equals(Object obj) {
 		return obj instanceof TCPFlow 
 				&& obj.hashCode() == this.hashCode();
-	}
-
-	@Override
-	public String toString() {
-		String base = String.format("%s, %d, %s, %d, %d, %d", 
-								srcIP, srcPort, destIP, destPort,
-								getCompletePacketCount(), getIncompletePacketCount());
-		String bandwidthString = String.format(", %d, %f", bytes, getBandwidth());
-
-		if(isComplete()) {
-			return base + bandwidthString;
-		}
-
-		return base;
 	}
 }
