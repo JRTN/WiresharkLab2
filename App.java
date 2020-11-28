@@ -93,8 +93,8 @@ public class App {
 						flow.setEndTimeStamp(handle.getTimestamp().getTime());
 					}
 
-					flow.addPacket(tcpPacket);
-					flow.addBytes(packet.length());
+					flow.addPacket(tcpPacket, packet.length());
+					//flow.addBytes(packet.length());
 					
 				} else if (packet.get(UdpPacket.class) != null) {
 					udpCounter++;
@@ -116,10 +116,6 @@ public class App {
 			e.printStackTrace();
 		}
 
-		/*double total_time = last_pack_time - first_pack_time;
-		total_time = total_time / 1000.0;*/
-
-
 		//PRINT TCP SUMMARY TABLE
 		System.out.println("TCP Summary Table");
 		for(TCPFlow flow : flowMap.keySet()) {
@@ -132,8 +128,6 @@ public class App {
 		System.out.printf("UDP, %d, %d\n", udpCounter, udpBytes);
 		System.out.printf("ICMP, %d, %d\n", icmpCounter, icmpBytes);
 		System.out.printf("Other, %d, %d\n", otherCounter, otherBytes);
-
-		
 
 		// Cleanup when complete
 		handle.close();
@@ -151,16 +145,14 @@ class TCPFlow {
 	private int numComplete;
 	private int numIncomplete;
 
-	private int bytes;
+	private int totalBytes;
+	private int completeBytes;
 
 	private boolean syn = false;
 	private boolean fin = false;
 
 	private long startTime;
 	private long endTime;
-
-	private List<TcpPacket> packetList = new LinkedList<>();
-
 
 	TCPFlow(String sip, int sport, String dip, int dport) {
 		srcIP = sip;
@@ -171,19 +163,18 @@ class TCPFlow {
 		numPackets = 0;
 		numComplete = 0;
 		numIncomplete = 0;
-		bytes = 0;
+		totalBytes = 0;
 		startTime = 0;
 		endTime = 0;
 	}
 
 	private double getBandwidth() {
 		double returnVal = 0.0;
-		if(numPackets >= 2) {
+		if(numComplete >= 2) {
 			double seconds = (endTime - startTime) / 1000000.0;
-			returnVal = (bytes / 125000.0) / seconds;
-			return returnVal;
+			returnVal = (completeBytes / 125000.0) / seconds;
 		}
-		return 0.0;
+		return returnVal;
 	}
 
 	public void setStartTimeStamp(long time) {
@@ -194,9 +185,9 @@ class TCPFlow {
 		endTime = time;
 	}
 
-	public void addPacket(TcpPacket packet) {
-		packetList.add(packet);
+	public void addPacket(TcpPacket packet, int totalPacketLength) {
 		numPackets++;
+		totalBytes += totalPacketLength;
 
 		if(packet.getHeader().getSyn()) {
 			setSyn(true);
@@ -204,6 +195,7 @@ class TCPFlow {
 
 		if(syn && !fin) {
 			numComplete++;
+			completeBytes += totalPacketLength;
 		} else if(!syn || isComplete()) {
 			numIncomplete++;
 		}
@@ -214,7 +206,7 @@ class TCPFlow {
 	}
 
 	public void addBytes(int val) {
-		bytes += val;
+		totalBytes += val;
 	}
 
 	public void setSyn(boolean val) {
@@ -248,7 +240,7 @@ class TCPFlow {
 		String base = String.format("%s, %d, %s, %d, %d, %d", 
 								srcIP, srcPort, destIP, destPort,
 								getCompletePacketCount(), getIncompletePacketCount());
-		String bandwidthString = String.format(", %d, %f", bytes, getBandwidth());
+		String bandwidthString = String.format(", %d, %f", totalBytes, getBandwidth());
 
 		if(isComplete()) {
 			return base + bandwidthString;
