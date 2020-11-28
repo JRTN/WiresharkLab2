@@ -65,30 +65,38 @@ public class App {
 
 		System.out.println(handle);
 
+		//Effectively to be used as a set with a get operation.
 		Map<TCPFlow, TCPFlow> flowMap = new LinkedHashMap<>();
 
 		PacketListener listener = new PacketListener() {
 			public void gotPacket(Packet packet) {
 				if (packet.get(TcpPacket.class) != null) {
 
+					//Get the necessary packets and headers to extract information
 					TcpPacket tcpPacket = packet.get(TcpPacket.class);
 					IpV4Packet ipPacket = packet.get(IpV4Packet.class);
 					TcpHeader tcpHeader = tcpPacket.getHeader();
 					IpV4Header ipHeader = ipPacket.getHeader();
 
+					//Extract the addresses and ports from the headers
 					String srcAddr = ipHeader.getSrcAddr().getHostAddress();
 					String dstAddr = ipHeader.getDstAddr().getHostAddress();
 					int srcPort = tcpHeader.getSrcPort().valueAsInt();
 					int dstPort = tcpHeader.getDstPort().valueAsInt();
 
+					//Create the new TCPFlow object with the correct information
 					TCPFlow flow = new TCPFlow(srcAddr, srcPort, dstAddr, dstPort);
 					if(!flowMap.containsKey(flow)) {
+						//If the TCPFlow does not exist (determined by its hash function) then we add it
+						//to our set of flows and set the start timestamp
 						flowMap.put(flow, flow);
 						flow.setStartTimeStamp(handle.getTimestamp().getTime());
 					} else {
+						//If the flow already exists in our set, we get the correct reference
 						flow = flowMap.get(flow);
 					}
 
+					//When we encounter the FIN flag, we have completed the flow and need to set the end timestamp
 					if(tcpHeader.getFin()) {
 						flow.setEndTimeStamp(handle.getTimestamp().getTime());
 					}
@@ -134,6 +142,9 @@ public class App {
 	}
 }
 
+/**
+ * Class that holds information for a list of packets comprising a TCP flow
+ */
 class TCPFlow {
 
 	private String srcIP;
@@ -141,35 +152,32 @@ class TCPFlow {
 	private String destIP;
 	private int destPort;
 
-	private int numPackets;
-	private int numComplete;
-	private int numIncomplete;
+	private int numPackets = 0;
+	private int numComplete = 0;
+	private int numIncomplete = 0;
 
-	private int totalBytes;
-	private int completeBytes;
+	private int totalBytes = 0;
+	private int completeBytes = 0;
 
 	private boolean syn = false;
 	private boolean fin = false;
 
-	private long startTime;
-	private long endTime;
+	private long startTime = 0;
+	private long endTime = 0;
 
 	TCPFlow(String sip, int sport, String dip, int dport) {
 		srcIP = sip;
 		srcPort = sport;
 		destIP = dip;
 		destPort = dport;
-
-		numPackets = 0;
-		numComplete = 0;
-		numIncomplete = 0;
-		totalBytes = 0;
-		startTime = 0;
-		endTime = 0;
 	}
 
+	/**
+	 * Calculates the bandwidth for this TCP flow in Mbps
+	 */
 	private double getBandwidth() {
 		double returnVal = 0.0;
+		//Only calculate bandwidth if there's more than two completed packets
 		if(numComplete >= 2) {
 			double seconds = (endTime - startTime) / 1000000.0;
 			returnVal = (completeBytes / 125000.0) / seconds;
@@ -185,36 +193,34 @@ class TCPFlow {
 		endTime = time;
 	}
 
+	/**
+	 * Adds a packet to this flow.
+	 * @param packet The TcpPacket portion of the packet
+	 * @param totalPacketLength The total length of the overall packet - this is NOT the length of the TcpPacket portion
+	 */
 	public void addPacket(TcpPacket packet, int totalPacketLength) {
 		numPackets++;
 		totalBytes += totalPacketLength;
 
 		if(packet.getHeader().getSyn()) {
-			setSyn(true);
+			syn = true;
 		}
 
+		//If a flow has started but not finished, we increment the completed packet count
+		//and add to the completed bytes 
 		if(syn && !fin) {
 			numComplete++;
 			completeBytes += totalPacketLength;
-		} else if(!syn || isComplete()) {
+		}
+		//If the flow is incomplete - that is missing a Syn flag or has received a syn flag but 
+		//has yet to receive the fin flag, we increment the number of incomplete packets
+		else if(!syn || isComplete()) {
 			numIncomplete++;
 		}
 
 		if(packet.getHeader().getFin()) {
-			setFin(true);
+			fin = true;
 		}
-	}
-
-	public void addBytes(int val) {
-		totalBytes += val;
-	}
-
-	public void setSyn(boolean val) {
-		syn = val;
-	}
-
-	public void setFin(boolean val) {
-		fin = val;
 	}
 
 	public boolean isComplete() {
@@ -236,6 +242,10 @@ class TCPFlow {
 		return numIncomplete;
 	}
 
+	/**
+	 * Generates a CSV string representing this TCP flow. A TCP CSV is in the form 
+	 * srcip, srcport, destip, destport, completed packets, incomplete packets, total bytes, average bandwidth
+	 */
 	public String asCSV() {
 		String base = String.format("%s, %d, %s, %d, %d, %d", 
 								srcIP, srcPort, destIP, destPort,
@@ -249,6 +259,10 @@ class TCPFlow {
 		return base;
 	}
 
+	/**
+	 * Generates a hash code based off of this TCP Flow's unique ID. The unique ID for a TCP Flow is
+	 * a combination of the source IP, source port, destination IP, and destination port.
+	 */
 	@Override
 	public int hashCode() {
 		return Objects.hash(srcIP, srcPort, destIP, destPort);
